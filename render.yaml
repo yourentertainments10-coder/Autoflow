@@ -1,128 +1,119 @@
 # Cartrends AutoFlow — Render Blueprint
 #
-# Deploys the SALES BOT itself (not just the webhook relay). Meta posts
-# straight to this service, so there is no relay hop, no polling, and no
-# dependency on anyone's PC being switched on.
+# CURRENT MODE: FREE (testing phase)
+# ==================================
+# Only the WEBHOOK RELAY runs on Render. The sales bot itself keeps running
+# on your PC and pulls messages from the relay every few seconds.
 #
-# IMPORTANT — two things this blueprint needs to work properly:
+#   customer -> Meta -> https://autoflow.onrender.com/webhook/wa  (this service)
+#                            |  in-memory queue
+#                            v
+#                       your PC polls /pull every 3s  -> bot replies via Meta
 #
-#  1. A PAID instance ("starter" or above). On the free plan Render spins the
-#     service down after ~15 minutes idle; a cold start takes ~50s and Meta's
-#     webhook times out long before that, so INBOUND MESSAGES WOULD BE LOST.
-#     Free is fine only for the relay-only setup (see relay/server.js).
+# Why this is safe on the free plan:
+#   * The relay is STATELESS — nothing important is stored here, so a
+#     spin-down costs a short delay, not data. Meta retries deliveries.
+#   * While the bot on your PC is running it polls every 3s, which keeps the
+#     relay awake anyway.
+#   * All real data (orders, learned parts, sale-loss log) stays in
+#     data/state.json on your PC, where you can inspect it during testing.
 #
-#  2. The disk below. data/state.json holds confirmed orders, the learned
-#     part knowledge and the sale-loss log. Without a mounted disk Render
-#     wipes it on every deploy and restart.
+# The one requirement: your PC must be running `npm start` to receive.
 #
-# Secrets are NOT in this file. Everything marked `sync: false` is typed once
-# into the Render dashboard when the blueprint is applied.
+# LATER (production): switch to the full-bot service at the bottom of this
+# file — always on, no PC needed. That needs a paid plan + disk. Moving over
+# is a config change, not a rewrite.
 
 services:
   - type: web
-    name: autoflow
+    name: autoflow                  # -> https://autoflow.onrender.com
     runtime: node
-    plan: starter
-    region: singapore
+    plan: free
+    region: singapore               # closest Render region to India
     branch: main
-    buildCommand: npm install
-    startCommand: npm start
-    healthCheckPath: /api/status
-    autoDeploy: false
-
-    disk:
-      name: autoflow-data
-      mountPath: /var/data
-      sizeGB: 1
+    rootDir: relay                  # only the relay folder is deployed
+    buildCommand: npm install       # relay has zero dependencies; runs instantly
+    startCommand: node server.js
+    healthCheckPath: /
+    autoDeploy: true
 
     envVars:
-      # ---- runtime ----
-      - key: NODE_VERSION
-        value: "22"
-      - key: DATA_DIR
-        value: /var/data
-      - key: TZ
-        value: Asia/Kolkata
-      # whatsapp-web.js pulls Puppeteer/Chromium, which this deployment never
-      # uses (Cloud API transport only). Skipping the download keeps the build
-      # small and fast.
-      - key: PUPPETEER_SKIP_DOWNLOAD
-        value: "true"
-
-      # ---- scope ----
-      - key: ENABLE_EXTRA_BOTS
-        value: "false"
-      - key: CUSTOMER_TRANSPORT
-        value: cloud
-
-      # ---- WhatsApp Cloud API ----
-      - key: CUSTOMER_BOT_NUMBER
-        value: "919289015775"
-      - key: WA_PHONE_NUMBER_ID
-        value: "1328878983638516"
-      - key: WA_WABA_ID
-        value: "1332473012292578"
-      - key: WA_VERIFY_TOKEN
-        sync: false          # cartrends-autoflow-verify-2026
-      - key: WA_CLOUD_TOKEN
-        sync: false          # SECRET — the EAATZA... access token
-
-      # ---- who the bot may talk to ----
-      - key: CUSTOMER_DMS
-        sync: false          # e.g. 919217396458,917004130460
-      - key: CUSTOMER_GROUPS
-        value: ""
-      - key: ADMIN_NUMBERS
-        sync: false
-      - key: ESCALATION_NUMBER
-        sync: false          # 919217030421 — must NOT be the bot's own number
-      - key: ESCALATION_TIMEOUT_MIN
-        value: "5"
-
-      # ---- Dealer Portal ----
-      - key: DEALER_PORTAL_BASE_URL
-        value: https://vagmine.vagminetech.com/api/v1
-      - key: DEALER_PORTAL_LOGIN_PATH
-        value: /auth/login
-      - key: DEALER_PORTAL_ANALYZE_PATH
-        sync: false          # confirm with Aneeq sir
-      - key: DEALER_PORTAL_CONFIRM_PATH
-        sync: false          # confirm with Aneeq sir
-      - key: DEALER_PORTAL_TOKEN
-        sync: false          # permanent token (preferred)
-      - key: DEALER_PORTAL_USERNAME
-        sync: false          # fallback if no permanent token
-      - key: DEALER_PORTAL_PASSWORD
-        sync: false
-      - key: DEALER_PORTAL_TIMEOUT_MS
-        value: "20000"
-
-      # ---- reporting ----
-      - key: DAILY_REPORT_TIME
-        value: "20:00"
-
-      # ---- optional ----
-      - key: ANTHROPIC_API_KEY
-        sync: false          # leave blank; deterministic parsers work without it
+      - key: VERIFY_TOKEN
+        sync: false                 # MUST equal WA_VERIFY_TOKEN in your .env
+                                    # (cartrends-autoflow-verify-2026)
+      - key: RELAY_SECRET
+        sync: false                 # any long random string; the same value
+                                    # goes in WEBHOOK_RELAY_SECRET on your PC
 
 # ---------------------------------------------------------------------------
-# ALTERNATIVE (free tier): relay only.
-# Keeps the bot on your PC and puts just the webhook queue on Render. The
-# relay is stateless, so spin-down only costs a few seconds of delay, not
-# data. To use it instead, delete the service above and uncomment this, then
-# set WEBHOOK_RELAY_URL + WEBHOOK_RELAY_SECRET in your local .env.
+# AFTER TESTING — full bot on Render (always on, no PC needed).
+#
+# To switch: delete the `autoflow` service above, uncomment this block, and
+# remove WEBHOOK_RELAY_URL / WEBHOOK_RELAY_SECRET from the PC's .env.
+# Requires a paid plan: free instances have NO persistent disk (state.json
+# would be wiped every deploy) and spin down (inbound messages lost).
 #
 #  - type: web
-#    name: cartrends-relay
+#    name: autoflow
 #    runtime: node
-#    plan: free
+#    plan: starter
 #    region: singapore
-#    rootDir: relay
-#    buildCommand: ""
-#    startCommand: node server.js
+#    branch: main
+#    buildCommand: npm install
+#    startCommand: npm start
+#    healthCheckPath: /api/status
+#    autoDeploy: false
+#    disk:
+#      name: autoflow-data
+#      mountPath: /var/data
+#      sizeGB: 1
 #    envVars:
-#      - key: VERIFY_TOKEN
-#        sync: false        # must match WA_VERIFY_TOKEN
-#      - key: RELAY_SECRET
-#        sync: false        # long random string
+#      - key: NODE_VERSION
+#        value: "22"
+#      - key: DATA_DIR
+#        value: /var/data
+#      - key: TZ
+#        value: Asia/Kolkata
+#      - key: PUPPETEER_SKIP_DOWNLOAD
+#        value: "true"
+#      - key: ENABLE_EXTRA_BOTS
+#        value: "false"
+#      - key: CUSTOMER_TRANSPORT
+#        value: cloud
+#      - key: CUSTOMER_BOT_NUMBER
+#        value: "919289015775"
+#      - key: WA_PHONE_NUMBER_ID
+#        value: "1328878983638516"
+#      - key: WA_WABA_ID
+#        value: "1332473012292578"
+#      - key: WA_VERIFY_TOKEN
+#        sync: false
+#      - key: WA_CLOUD_TOKEN
+#        sync: false
+#      - key: CUSTOMER_DMS
+#        sync: false
+#      - key: CUSTOMER_GROUPS
+#        value: ""
+#      - key: ADMIN_NUMBERS
+#        sync: false
+#      - key: ESCALATION_NUMBER
+#        sync: false
+#      - key: DEALER_PORTAL_BASE_URL
+#        value: https://vagmine.vagminetech.com/api/v1
+#      - key: DEALER_PORTAL_LOGIN_PATH
+#        value: /auth/login
+#      - key: DEALER_PORTAL_ANALYZE_PATH
+#        sync: false
+#      - key: DEALER_PORTAL_CONFIRM_PATH
+#        sync: false
+#      - key: DEALER_PORTAL_TOKEN
+#        sync: false
+#      - key: DEALER_PORTAL_USERNAME
+#        sync: false
+#      - key: DEALER_PORTAL_PASSWORD
+#        sync: false
+#      - key: DAILY_REPORT_TIME
+#        value: "20:00"
+#      - key: ANTHROPIC_API_KEY
+#        sync: false
 # ---------------------------------------------------------------------------
