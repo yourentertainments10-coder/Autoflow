@@ -1,0 +1,128 @@
+# Cartrends AutoFlow — Render Blueprint
+#
+# Deploys the SALES BOT itself (not just the webhook relay). Meta posts
+# straight to this service, so there is no relay hop, no polling, and no
+# dependency on anyone's PC being switched on.
+#
+# IMPORTANT — two things this blueprint needs to work properly:
+#
+#  1. A PAID instance ("starter" or above). On the free plan Render spins the
+#     service down after ~15 minutes idle; a cold start takes ~50s and Meta's
+#     webhook times out long before that, so INBOUND MESSAGES WOULD BE LOST.
+#     Free is fine only for the relay-only setup (see relay/server.js).
+#
+#  2. The disk below. data/state.json holds confirmed orders, the learned
+#     part knowledge and the sale-loss log. Without a mounted disk Render
+#     wipes it on every deploy and restart.
+#
+# Secrets are NOT in this file. Everything marked `sync: false` is typed once
+# into the Render dashboard when the blueprint is applied.
+
+services:
+  - type: web
+    name: autoflow
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/status
+    autoDeploy: false
+
+    disk:
+      name: autoflow-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # ---- runtime ----
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /var/data
+      - key: TZ
+        value: Asia/Kolkata
+      # whatsapp-web.js pulls Puppeteer/Chromium, which this deployment never
+      # uses (Cloud API transport only). Skipping the download keeps the build
+      # small and fast.
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: "true"
+
+      # ---- scope ----
+      - key: ENABLE_EXTRA_BOTS
+        value: "false"
+      - key: CUSTOMER_TRANSPORT
+        value: cloud
+
+      # ---- WhatsApp Cloud API ----
+      - key: CUSTOMER_BOT_NUMBER
+        value: "919289015775"
+      - key: WA_PHONE_NUMBER_ID
+        value: "1328878983638516"
+      - key: WA_WABA_ID
+        value: "1332473012292578"
+      - key: WA_VERIFY_TOKEN
+        sync: false          # cartrends-autoflow-verify-2026
+      - key: WA_CLOUD_TOKEN
+        sync: false          # SECRET — the EAATZA... access token
+
+      # ---- who the bot may talk to ----
+      - key: CUSTOMER_DMS
+        sync: false          # e.g. 919217396458,917004130460
+      - key: CUSTOMER_GROUPS
+        value: ""
+      - key: ADMIN_NUMBERS
+        sync: false
+      - key: ESCALATION_NUMBER
+        sync: false          # 919217030421 — must NOT be the bot's own number
+      - key: ESCALATION_TIMEOUT_MIN
+        value: "5"
+
+      # ---- Dealer Portal ----
+      - key: DEALER_PORTAL_BASE_URL
+        value: https://vagmine.vagminetech.com/api/v1
+      - key: DEALER_PORTAL_LOGIN_PATH
+        value: /auth/login
+      - key: DEALER_PORTAL_ANALYZE_PATH
+        sync: false          # confirm with Aneeq sir
+      - key: DEALER_PORTAL_CONFIRM_PATH
+        sync: false          # confirm with Aneeq sir
+      - key: DEALER_PORTAL_TOKEN
+        sync: false          # permanent token (preferred)
+      - key: DEALER_PORTAL_USERNAME
+        sync: false          # fallback if no permanent token
+      - key: DEALER_PORTAL_PASSWORD
+        sync: false
+      - key: DEALER_PORTAL_TIMEOUT_MS
+        value: "20000"
+
+      # ---- reporting ----
+      - key: DAILY_REPORT_TIME
+        value: "20:00"
+
+      # ---- optional ----
+      - key: ANTHROPIC_API_KEY
+        sync: false          # leave blank; deterministic parsers work without it
+
+# ---------------------------------------------------------------------------
+# ALTERNATIVE (free tier): relay only.
+# Keeps the bot on your PC and puts just the webhook queue on Render. The
+# relay is stateless, so spin-down only costs a few seconds of delay, not
+# data. To use it instead, delete the service above and uncomment this, then
+# set WEBHOOK_RELAY_URL + WEBHOOK_RELAY_SECRET in your local .env.
+#
+#  - type: web
+#    name: cartrends-relay
+#    runtime: node
+#    plan: free
+#    region: singapore
+#    rootDir: relay
+#    buildCommand: ""
+#    startCommand: node server.js
+#    envVars:
+#      - key: VERIFY_TOKEN
+#        sync: false        # must match WA_VERIFY_TOKEN
+#      - key: RELAY_SECRET
+#        sync: false        # long random string
+# ---------------------------------------------------------------------------

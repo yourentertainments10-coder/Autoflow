@@ -1,0 +1,18 @@
+node_modules/
+.env
+data/
+
+# Local scratch / API dumps — these contain REAL Dealer Portal tokens and
+# login responses. Never commit them.
+dp_token.txt
+dp_login.json
+ep_out.json
+dash.json
+part.json
+openapi.json
+
+# WhatsApp linked-device leftovers (not used by the Cloud API transport)
+.wwebjs_cache/
+.wwebjs_auth/
+
+*.log
