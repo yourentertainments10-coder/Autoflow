@@ -112,6 +112,37 @@ function attach(bots) {
         );
       }
 
+      // GROUP Rahul | 919812345678, 919887654321
+      mm = text.match(/^GROUP\s+([^|]+?)(?:\s*\|\s*(.+))?$/i);
+      if (mm) {
+        try {
+          const g = await require('./groups').create(bots.customer.transport, {
+            subject: `${config.groupSubjectPrefix} - ${mm[1].trim()}`,
+            participants: (mm[2] || '').split(','),
+          });
+          return send(
+            [
+              `Group created: "${g.subject}"`,
+              `ID: ${g.groupId}`,
+              `Members added: ${g.participants.length}`,
+              g.inviteLink ? `Invite: ${g.inviteLink}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n')
+          );
+        } catch (e) {
+          return send('Could not create the group: ' + e.message);
+        }
+      }
+      if (/^GROUPS$/i.test(text)) {
+        const rows = require('./groups').all();
+        return send(
+          rows.length
+            ? '*Groups:*\n' +
+                rows.map((g) => `${g.subject} — ${g.groupId} (${g.participants.length})`).join('\n')
+            : 'No groups created yet. Use: GROUP <name> | <phone1>, <phone2>'
+        );
+      }
       mm = text.match(/^CUSTOMER ADD\s+(.+?),\s*(\+?[\d\s-]+)$/i);
       if (mm) {
         const c = store.upsertCustomer(mm[2], mm[1].trim());

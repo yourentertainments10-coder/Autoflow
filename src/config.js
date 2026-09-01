@@ -56,6 +56,10 @@ const config = {
   customerDms: list(process.env.CUSTOMER_DMS).map(digits).filter(Boolean),
   customerDmsAll: list(process.env.CUSTOMER_DMS).some((v) => v.toLowerCase() === 'all'),
   warehouseTeamNumbers: list(process.env.WAREHOUSE_TEAM_NUMBERS).map(digits).filter(Boolean),
+  // Numbers added to EVERY customer group the bot creates (dealer, customer
+  // care, monitoring...). The customer's own number is added on top.
+  groupDefaultMembers: list(process.env.GROUP_DEFAULT_MEMBERS).map(digits).filter(Boolean),
+  groupSubjectPrefix: (process.env.GROUP_SUBJECT_PREFIX || 'Cartrends').trim(),
   internalWarehouseName: process.env.INTERNAL_WAREHOUSE_NAME || 'Bijwasan',
 
   stockBroadcastTimes: times(process.env.STOCK_BROADCAST_TIMES, ['09:30', '16:00']),

@@ -39,6 +39,9 @@ class CustomerBot {
     // SAFETY: groups must be explicitly whitelisted in CUSTOMER_GROUPS — the
     // bot's number may sit in unrelated real groups. Entries may be a group
     // name or a group id (digits from "1203...@g.us").
+    // A group the bot itself created is always ours to answer in — no
+    // whitelist entry needed (CUSTOMER_GROUPS is for legacy linked-device).
+    if (require('../core/groups').findByGroupId(m.chatId)) return true;
     if (config.customerGroupsAll) return true;
     if (!config.customerGroups.length) return false;
     const name = (m.chatName || '').toLowerCase();

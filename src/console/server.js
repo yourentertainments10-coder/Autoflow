@@ -93,6 +93,23 @@ function start(bots) {
     res.json({ resolved: await require('../core/availability').resolve(lines) });
   });
 
+  // ---- WhatsApp groups (Cloud API) ----
+  app.get('/api/groups', (req, res) => res.json({ groups: require('../core/groups').all() }));
+  app.post('/api/groups', async (req, res) => {
+    const { subject, customer, participants } = req.body || {};
+    if (!subject) return res.status(400).json({ error: 'subject required' });
+    try {
+      const g = await require('../core/groups').create(bots.customer.transport, {
+        subject,
+        customer,
+        participants: Array.isArray(participants) ? participants : String(participants || '').split(','),
+      });
+      res.json({ group: g });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ---- sale loss + knowledge ----
   app.get('/api/loss', (req, res) =>
     res.json({ days: Number(req.query.days) || 7, lost: inquiries.lostSales(Number(req.query.days) || 7) })

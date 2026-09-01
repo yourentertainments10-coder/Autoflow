@@ -62,8 +62,54 @@ class CloudTransport {
     store.log(this.botKey, `send -> ${to} [cloud]: ${text.slice(0, 120).replace(/\n/g, ' | ')}`);
   }
 
+  // chatId may be a 1:1 number or a group id — route accordingly.
   async sendToChat(chatId, text) {
-    return this.sendText(String(chatId).split('@')[0], text);
+    const id = String(chatId || '');
+    const groups = require('../core/groups');
+    if (/@g\.us/.test(id) || groups.findByGroupId(id)) {
+      return this.sendToGroup(id, text);
+    }
+    return this.sendText(id.split('@')[0], text);
+  }
+
+  // ---- Groups -------------------------------------------------------------
+  // Contract verified by probing the live API (see core/groups.js).
+  async createGroup({ subject, participants, joinApprovalMode }) {
+    if (!subject) throw new Error('group subject is required');
+    const body = {
+      messaging_product: 'whatsapp',
+      subject: String(subject).slice(0, 100),
+      join_approval_mode: joinApprovalMode || 'auto_approve',
+    };
+    const people = (participants || []).map((p) => store.normPhone(p)).filter(Boolean);
+    if (people.length) body.participants = people.map((user) => ({ user }));
+
+    const data = await this._post(`${config.cloud.phoneNumberId}/groups`, body);
+    // be tolerant about where the id lands in the response
+    const groupId =
+      data.group_id || data.id || (data.groups && data.groups[0] && (data.groups[0].id || data.groups[0].group_id));
+    if (!groupId) throw new Error('group created but no id in response: ' + JSON.stringify(data).slice(0, 200));
+    store.log(this.botKey, `group created: "${subject}" -> ${groupId} (${people.length} participant(s) requested)`);
+    return { groupId: String(groupId), inviteLink: data.invite_link || data.link || null, raw: data };
+  }
+
+  async listGroups() {
+    const res = await fetch(`${GRAPH}/${config.cloud.phoneNumberId}/groups`, {
+      headers: { Authorization: 'Bearer ' + config.cloud.token },
+    });
+    return res.json();
+  }
+
+  // send into a group; chatId here is the group id
+  async sendToGroup(groupId, text) {
+    await this._post(`${config.cloud.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'group',
+      to: String(groupId).split('@')[0],
+      type: 'text',
+      text: { body: text, preview_url: false },
+    });
+    store.log(this.botKey, `send -> group ${groupId}: ${text.slice(0, 100).replace(/\n/g, ' | ')}`);
   }
 
   // template send — business-initiated messages (24h window ke bahar) ke liye
@@ -122,15 +168,32 @@ class CloudTransport {
         }
         for (const msg of value.messages || []) {
           try {
+            // GROUP DETECTION. The exact field Meta uses for inbound group
+            // messages is not documented in what we have, so check every
+            // plausible location. When something looks group-ish but we
+            // cannot place it, the raw payload is logged below so the real
+            // shape can be read off a live message once.
+            const groupId =
+              msg.group_id ||
+              (msg.group && (msg.group.id || msg.group.group_id)) ||
+              (msg.context && msg.context.group_id) ||
+              (value.metadata && value.metadata.group_id) ||
+              null;
+            const isGroup = Boolean(groupId);
             const m = {
               from: store.normPhone(msg.from),
-              chatId: store.normPhone(msg.from) + '@cloud',
-              chatName: '',
-              isGroup: false, // groups Cloud API par OBA ke baad aayenge
+              chatId: isGroup ? String(groupId) : store.normPhone(msg.from) + '@cloud',
+              chatName: (msg.group && msg.group.subject) || '',
+              isGroup,
               body: (msg.text && msg.text.body) || (msg.image && msg.image.caption) || '',
               hasMedia: Boolean(msg.image || msg.document),
               mediaType: msg.type,
             };
+            // Learn the real payload shape: log anything carrying a hint of a
+            // group that we did not manage to parse into a group id.
+            if (!isGroup && /group/i.test(JSON.stringify(msg))) {
+              store.log(this.botKey, 'UNRECOGNISED GROUP PAYLOAD (raw): ' + JSON.stringify(msg).slice(0, 700));
+            }
             if (msg.image && msg.image.id) {
               const media = await this._downloadMedia(msg.image.id);
               if (media && /^image\//.test(media.mime)) {
